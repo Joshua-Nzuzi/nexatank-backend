@@ -11,6 +11,8 @@ app.use(express.json());
 // Routes
 const authRoutes = require('./routes/auth.routes');
 app.use('/api/auth', authRoutes);
+const testRoutes = require('./routes/test.routes');
+app.use('/api/test', testRoutes);
 
 // Health check (Railway)
 app.get('/health', (_, res) => {

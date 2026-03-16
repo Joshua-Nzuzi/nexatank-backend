@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
+const compression = require('compression');
 
 const app = express();
 
@@ -10,6 +11,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(morgan('dev'));
+app.use(compression()); // Gzip compression for responses > 1KB
 
 /* =========================
    HEALTH CHECK
@@ -29,6 +31,10 @@ app.get('/health', (req, res) => {
 // Authentification
 const authRoutes = require('./routes/auth.routes');
 app.use('/api/auth', authRoutes);
+
+// Tanks routes (calcul volume/hauteur)
+const tanksRoutes = require('./routes/tanks.routes');
+app.use('/api/tanks', tanksRoutes);
 
 // Routes protégées (JWT + rôles)
 const protectedRoutes = require('./routes/protected.routes');

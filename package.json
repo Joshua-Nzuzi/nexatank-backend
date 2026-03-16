@@ -18,11 +18,13 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
+    "knex": "^3.1.0",
     "morgan": "^1.10.1",
-    "pg": "^8.17.2"
+    "pg": "^8.20.0"
   },
   "devDependencies": {
     "cross-env": "^10.1.0",
+    "knex-cli": "^1.0.1",
     "nodemon": "^3.1.11"
   }
 }

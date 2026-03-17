@@ -13,6 +13,13 @@ app.use(express.json());
 app.use(morgan('dev'));
 app.use(compression()); // Gzip compression for responses > 1KB
 
+// 🚫 Désactiver le cache pour éviter les 304
+app.disable('etag'); 
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 /* =========================
    HEALTH CHECK
 ========================= */

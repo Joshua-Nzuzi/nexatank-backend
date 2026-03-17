@@ -1,10 +1,41 @@
-const { validateTankExists, getVolumeByDepth, saveMeasurement } = require('../services/tankService');
+const tankService = require('../services/tankService');
 const cacheService = require('../services/cacheService');
 
+/**
+ * GET /api/tanks
+ * Récupère la liste dynamique des cuves et les dernières mesures
+ */
+async function getTanks(req, res) {
+  try {
+    // 1. Récupération des cuves réelles (JOIN tanks + tank_types)
+    const tanks = await tankService.getAllTanks();
+    
+    // 2. Récupération des 5 dernières mesures pour le Dashboard Gérant
+    const recentMeasures = await tankService.getRecentMeasurements(5);
+
+    res.status(200).json({ 
+      success: true, 
+      tanks: tanks,
+      recentMeasures: recentMeasures 
+    });
+  } catch (err) {
+    console.error('getTanks controller error:', err.message || err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Erreur lors de la récupération des données des cuves' 
+    });
+  }
+}
+
+/**
+ * POST /api/tanks/volume
+ * Calcule le volume, l'enregistre dans l'historique et met à jour la cuve
+ */
 async function postVolume(req, res) {
   try {
     const { tank_id, depth_cm } = req.body;
 
+    // Validation des entrées
     if (!tank_id || depth_cm === undefined || depth_cm === null) {
       return res.status(400).json({ success: false, message: 'Paramètres manquants: tank_id et depth_cm requis' });
     }
@@ -17,63 +48,65 @@ async function postVolume(req, res) {
     }
 
     if (Number.isNaN(depth) || depth < 0) {
-      return res.status(400).json({ success: false, message: 'depth_cm invalide' });
+      return res.status(400).json({ success: false, message: 'profondeur invalide' });
     }
 
-    // Validate that tank exists (prevents calculations on non-existent tanks)
-    const tankExists = await validateTankExists(tankId);
+    // Vérification de l'existence de la cuve fixe
+    const tankExists = await tankService.validateTankExists(tankId);
     if (!tankExists) {
-      return res.status(404).json({
-        success: false,
-        message: 'Tank non trouvé'
-      });
+      return res.status(404).json({ success: false, message: 'Cuve non trouvée en base de données' });
     }
 
-    // Try to get from cache first
+    // Gestion du Cache pour optimiser les appels SQL répétitifs
     const cacheKey = cacheService.generateKey(tankId, depth);
     let rawVolume = cacheService.get(cacheKey);
 
-    // If not in cache, compute and cache
     if (rawVolume === null) {
-      rawVolume = await getVolumeByDepth(tankId, depth);
-      cacheService.set(cacheKey, rawVolume, 60000); // Cache for 60 seconds
+      // Appel à la fonction PostgreSQL immuable
+      rawVolume = await tankService.getVolumeByDepth(tankId, depth);
+      cacheService.set(cacheKey, rawVolume, 60000); // Cache de 1 minute
     }
 
-    // Cas où la fonction SQL retourne un message explicite
+    // Gestion des messages spéciaux renvoyés par la fonction SQL
     const specialMessages = new Set(['Charte vide', 'Aucun volume mesurable', 'Volume non pris en charge']);
-
     if (rawVolume === null || specialMessages.has(String(rawVolume))) {
-      return res.status(200).json({ success: true, volume: null, message: String(rawVolume) });
+      return res.status(200).json({ 
+        success: true, 
+        volume: null, 
+        message: String(rawVolume) || 'Calcul impossible' 
+      });
     }
 
     const volumeInt = Math.round(Number(rawVolume));
 
-    // Enregistre la mesure pour historique (user venant du middleware requireAuth)
+    // ENREGISTREMENT ET SYNCHRONISATION
+    // L'userId provient du token décodé par le middleware requireAuth
     try {
       const userId = req.user && req.user.id ? req.user.id : null;
       if (userId) {
-        await saveMeasurement(tankId, userId, depth, volumeInt);
+        // Enregistre la mesure ET met à jour la colonne current_volume de la cuve
+        await tankService.saveMeasurement(tankId, userId, depth, volumeInt);
       }
     } catch (saveErr) {
-      // PostgreSQL UNIQUE constraint violation (code 23505)
-      if (saveErr.code === '23505') {
-        return res.status(409).json({
-          success: false,
-          message: 'Une mesure avec le même timestamp existe déjà pour ce tank/utilisateur. Attendez au moins 1 seconde avant de réessayer.',
-          errorCode: 'DUPLICATE_MEASUREMENT'
-        });
-      }
       console.error('Erreur enregistrement measurement:', saveErr.message || saveErr);
-      // Ne bloquons pas la requête principale si l'enregistrement échoue pour d'autres raisons
+      // On continue pour renvoyer au moins le volume à l'utilisateur
     }
 
-    return res.status(200).json({ success: true, volume: volumeInt });
+    return res.status(200).json({ 
+      success: true, 
+      volume: volumeInt 
+    });
+
   } catch (err) {
-    console.error('postVolume error:', err.message || err);
-    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+    console.error('postVolume controller error:', err.message || err);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Erreur serveur lors du calcul du volume' 
+    });
   }
 }
 
 module.exports = {
+  getTanks,
   postVolume,
 };
